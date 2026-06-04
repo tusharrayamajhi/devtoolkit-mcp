@@ -289,14 +289,21 @@ server.tool("analyze_complexity",
 );
 
 server.tool("find_todos",
-  "Find all TODO, FIXME, HACK, NOTE, and XXX comments in files.",
+  "Find all TODO, FIXME, HACK, NOTE, and XXX comments in files, then AI-prioritizes them by urgency.",
   {
     dir_path: z.string().optional().describe("Directory to search in"),
     glob: z.string().optional().describe("File glob pattern"),
     tags: z.array(z.string()).optional().describe("Comment tags to search for"),
   },
   async (args) => {
-    try { return ok(await handleCodeTool("find_todos", args)); } catch (e) { return err(e); }
+    try {
+      const raw = await handleCodeTool("find_todos", args);
+      const priority = await sampleFromClient(
+        `Here are the TODO/FIXME comments found in a codebase:\n\n${raw}\n\nRank them by urgency: security issues first, then bugs, then missing features, then cleanup. For each group list the file:line and a one-line reason why it matters. Be concise.`,
+        "You are a senior software engineer doing a code review. Prioritize ruthlessly."
+      );
+      return ok(`${raw}\n\n---\n## AI Priority Analysis\n${priority}`);
+    } catch (e) { return err(e); }
   }
 );
 

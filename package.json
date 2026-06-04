@@ -1,0 +1,31 @@
+{
+  "name": "devtoolkit-mcp",
+  "version": "1.0.0",
+  "description": "A production-quality MCP server with 20+ developer tools across file, git, code analysis, HTTP, and system domains.",
+  "main": "dist/index.js",
+  "bin": {
+    "devtoolkit-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write src"
+  },
+  "keywords": ["mcp", "developer-tools", "claude", "ai", "model-context-protocol"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "axios": "^1.7.2",
+    "fast-glob": "^3.3.2",
+    "simple-git": "^3.25.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.15.6",
+    "typescript": "^5.4.5"
+  }
+}

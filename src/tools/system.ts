@@ -241,7 +241,7 @@ export async function handleSystemTool(name: string, args: unknown): Promise<str
       }
       try {
         const start = Date.now();
-        const { stdout, stderr } = await execAsync(command, { cwd, timeout: timeout_ms });
+        const { stdout, stderr } = await execAsync(command, { cwd, timeout: timeout_ms, maxBuffer: 100 * 1024 * 1024 });
         const elapsed = Date.now() - start;
         return safeJson({ command, stdout: stdout.trim(), stderr: stderr.trim(), success: true, elapsed_ms: elapsed });
       } catch (e: unknown) {

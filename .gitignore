@@ -1,5 +1,5 @@
 node_modules/
-dist/
+# dist/ is intentionally committed so users can run without building
 *.js.map
 *.d.ts.map
 .env

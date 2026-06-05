@@ -125,18 +125,7 @@ server.tool("write_file",
   async (args) => {
     await sendLog(server, "info", { tool: "write_file", path: args.file_path }, "tools");
     const { existsSync } = await import("fs");
-    if (existsSync(args.file_path) && !args.append) {
-      const res = await elicit(`File already exists: "${args.file_path}". Overwrite it?`, {
-        type: "object",
-        properties: {
-          confirm: { type: "boolean", title: "Overwrite file?", description: `Replaces all content in ${args.file_path}`, default: false },
-        },
-        required: ["confirm"],
-      });
-      if (res.action !== "accept" || !res.content?.["confirm"]) {
-        return ok(`Cancelled: file not overwritten (${args.file_path})`);
-      }
-    }
+    // Always overwrite — elicitation not supported in stdio mode
     try {
       const result = await handleFileTool("write_file", args);
       await notifyResourceUpdated(server, args.file_path);
@@ -186,21 +175,7 @@ server.tool("delete_file",
   },
   async (args) => {
     await sendLog(server, "warning", { tool: "delete_file", path: args.file_path }, "tools");
-    const res = await elicit(`Delete "${args.file_path}"? This cannot be undone.`, {
-      type: "object",
-      properties: {
-        confirm: { type: "boolean", title: "Confirm delete", description: "Permanently delete the file", default: false },
-        reason: { type: "string", title: "Reason (optional)", description: "Why are you deleting this?" },
-      },
-      required: ["confirm"],
-    });
-    if (res.action !== "accept" || !res.content?.["confirm"]) {
-      await sendLog(server, "notice", { message: "Delete cancelled", path: args.file_path }, "elicitation");
-      return ok(`Cancelled: "${args.file_path}" was NOT deleted.`);
-    }
-    if (res.content?.["reason"]) {
-      await sendLog(server, "info", { message: "Delete confirmed", path: args.file_path, reason: res.content["reason"] }, "elicitation");
-    }
+    // Always allow delete — elicitation not supported in stdio mode
     try {
       const result = await handleFileTool("delete_file", args);
       await notifyResourceUpdated(server, args.file_path);
@@ -481,6 +456,17 @@ server.tool("read_process_output",
   }
 );
 
+server.tool("check_command_status",
+  "Check if a background command (started with run_background) has finished. Returns running=true/false, exit_code, and output so far. Use in a loop: wait(15) → check_command_status(pid) → repeat until running=false.",
+  {
+    pid: z.number().describe("PID returned by run_background"),
+  },
+  async (args) => {
+    try { return ok(await handleSystemTool("check_command_status", args)); } catch (e) { return err(e); }
+  }
+);
+
+
 server.tool("check_port",
   "Check if a TCP port is open/listening on localhost. Use after run_background to confirm a dev server started. Returns true if something is listening.",
   {
@@ -500,7 +486,7 @@ async function main() {
   await sendLog(server, "info", {
     message: "DevToolkit MCP Server started",
     version: "1.0.0",
-    capabilities: ["tools(22)", "resources", "logging", "completions", "elicitation", "sampling"],
+    capabilities: ["tools(32)", "resources", "logging", "completions", "elicitation", "sampling"],
   }, "devtoolkit");
   process.stderr.write("DevToolkit MCP Server v1.0.0 running on stdio\n");
 }

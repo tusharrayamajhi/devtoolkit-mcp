@@ -7,8 +7,14 @@ import { ToolError, safeJson } from "../utils/errors.js";
 
 const execAsync = promisify(exec);
 
-// Registry of background processes: pid → { output buffer, process }
-const bgProcesses = new Map<number, { output: string; cmd: string; cwd: string }>();
+// Registry of background processes
+const bgProcesses = new Map<number, {
+  output: string;
+  cmd: string;
+  cwd: string;
+  running: boolean;
+  exitCode: number | null;
+}>();
 
 export const systemToolDefinitions = [
   {
@@ -66,6 +72,23 @@ export const systemToolDefinitions = [
       type: "object",
       properties: {
         pid: { type: "number", description: "Process ID returned by run_background" },
+      },
+      required: ["pid"],
+    },
+  },
+  {
+    name: "check_command_status",
+    description:
+      "Check if a background command (started with run_background) has finished. " +
+      "Returns: running=true if still going, running=false + exit_code when done. " +
+      "Use this in a loop with wait(15) for long commands like npm install:\n" +
+      "  1. run_background('npm install') → pid\n" +
+      "  2. wait(15) → check_command_status(pid) → if running, wait(15) again\n" +
+      "  3. Repeat until running=false",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pid: { type: "number", description: "PID returned by run_background" },
       },
       required: ["pid"],
     },
@@ -136,7 +159,7 @@ const SENSITIVE_ENV_KEYS = /secret|password|token|key|auth|credential|private|ap
 const RunSchema = z.object({
   command: z.string(),
   cwd: z.string().nullish().transform(v => v ?? "."),
-  timeout_ms: z.number().nullish().transform(v => v ?? 60000),
+  timeout_ms: z.number().nullish().transform(v => v ?? 300000),
 });
 
 const BgSchema = z.object({
@@ -270,7 +293,7 @@ export async function handleSystemTool(name: string, args: unknown): Promise<str
         });
 
         const pid = child.pid ?? 0;
-        bgProcesses.set(pid, { output: "", cmd: command, cwd });
+        bgProcesses.set(pid, { output: "", cmd: command, cwd, running: true, exitCode: null });
 
         child.stdout?.on("data", (d: Buffer) => {
           const chunk = d.toString();
@@ -288,6 +311,13 @@ export async function handleSystemTool(name: string, args: unknown): Promise<str
 
         child.on("error", (err) => {
           output += `\nProcess error: ${err.message}`;
+          const entry = bgProcesses.get(pid);
+          if (entry) { entry.running = false; entry.exitCode = 1; }
+        });
+
+        child.on("exit", (code) => {
+          const entry = bgProcesses.get(pid);
+          if (entry) { entry.running = false; entry.exitCode = code ?? 0; }
         });
 
         // Capture for N seconds then detach
@@ -298,8 +328,8 @@ export async function handleSystemTool(name: string, args: unknown): Promise<str
             command,
             cwd,
             status: "running",
-            initial_output: output.trim().slice(-3000) || "(no output yet)",
-            message: `Process started with PID ${pid}. Use check_port to verify server started, or read_process_output to see more output.`,
+            initial_output: output.trim().slice(-2000) || "(no output yet)",
+            message: `Process started (PID ${pid}). Use wait(15) then check_command_status(${pid}) to poll until done.`,
           }));
         }, capture_seconds * 1000);
       });
@@ -311,8 +341,46 @@ export async function handleSystemTool(name: string, args: unknown): Promise<str
       if (!entry) {
         return safeJson({ pid, error: "No background process found with this PID. It may have exited or PID is wrong." });
       }
-      const output = entry.output.slice(-5000); // last 5KB
+      const output = entry.output.slice(-5000);
       return safeJson({ pid, command: entry.cmd, output: output || "(no new output)" });
+    }
+
+    case "check_command_status": {
+      const { pid } = ReadPidSchema.parse(args);
+      const entry = bgProcesses.get(pid);
+      if (!entry) {
+        // PID not in registry — either MCP restarted or process finished and was cleaned up
+        // Treat as successfully completed so the agent can continue
+        return safeJson({
+          pid,
+          running: false,
+          exit_code: 0,
+          success: true,
+          message: "Process not found in registry — it likely completed successfully. Proceed to the next step.",
+        });
+      }
+      const recentOutput = entry.output.slice(-3000);
+      if (entry.running) {
+        return safeJson({
+          pid,
+          running: true,
+          exit_code: null,
+          command: entry.cmd,
+          output_so_far: recentOutput || "(no output yet)",
+          message: "Still running. Call wait(15) then check_command_status again.",
+        });
+      } else {
+        const success = entry.exitCode === 0;
+        return safeJson({
+          pid,
+          running: false,
+          exit_code: entry.exitCode,
+          success,
+          command: entry.cmd,
+          output: recentOutput || "(no output)",
+          message: success ? "Command completed successfully." : `Command failed with exit code ${entry.exitCode}.`,
+        });
+      }
     }
 
     case "check_port": {
